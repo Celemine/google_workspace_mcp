@@ -137,6 +137,40 @@ def _stateless_inline_disabled_message(
     )
 
 
+DRIVE_OBSERVATION_FIELDS = "id,mimeType,version,trashed,capabilities(canEdit,canTrash,canUntrash)"
+
+
+@server.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    )
+)
+@require_google_service("drive", "drive_read")
+@handle_http_errors("observe_drive_file_state", is_read_only=True, service_type="drive")
+async def observe_drive_file_state(service, user_google_email: str, file_id: str) -> Dict[str, Any]:
+    """Read bounded file-state metadata for one exact Drive ID. Does not follow shortcuts,
+    read content/names/permissions or establish restoration or authorization. Missing access
+    and a missing resource are indistinguishable; an error never proves absence.
+    """
+    metadata = await asyncio.to_thread(
+        service.files()
+        .get(fileId=file_id, fields=DRIVE_OBSERVATION_FIELDS, supportsAllDrives=True)
+        .execute
+    )
+    capabilities = metadata.get("capabilities", {})
+    kind = {FOLDER_MIME_TYPE: "folder", SHORTCUT_MIME_TYPE: "shortcut"}.get(metadata.get("mimeType"), "file")
+    # Explicit allowlist: a provider adding fields cannot expand disclosure.
+    return {
+        "version": 1,
+        "file_id": metadata["id"],
+        "revision": str(metadata["version"]) if "version" in metadata else None,
+        "kind": kind,
+        "trashed": metadata.get("trashed") if isinstance(metadata.get("trashed"), bool) else None,
+        **{name: capabilities.get(name) if isinstance(capabilities.get(name), bool) else None
+           for name in ("canEdit", "canTrash", "canUntrash")},
+    }
+
+
 @server.tool(
     title="Search Drive Files",
     annotations=ToolAnnotations(
