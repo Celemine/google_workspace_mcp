@@ -57,7 +57,22 @@ export default {
 			return new Response("Google Workspace is not configured.", { status: 503 });
 		}
 
-		const stub = env.WORKSPACE_MCP_CONTAINER.getByName(pickContainerInstance());
-		return stub.fetch(request);
+		const instance = pickContainerInstance();
+		const stub = env.WORKSPACE_MCP_CONTAINER.getByName(instance);
+		// trace: Google health-check failures after idle (remove once answered). A slow answer is usually a cold start.
+		const started = Date.now();
+		try {
+			const response = await stub.fetch(request);
+			const elapsedMs = Date.now() - started;
+			if (elapsedMs > 2_000) console.log("workspace-mcp: trace: slow container answer", { instance, status: response.status, elapsedMs });
+			return response;
+		} catch (error) {
+			console.error("workspace-mcp: container fetch threw", {
+				instance,
+				error: error instanceof Error ? error.name : "unknown",
+				elapsedMs: Date.now() - started,
+			});
+			throw error;
+		}
 	},
 } satisfies ExportedHandler<Env>;
